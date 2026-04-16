@@ -1,252 +1,150 @@
-# BullBear AI – Stock Trend Predictor
+# BullBear AI — Stock Trend Prediction System
 
-An end-to-end machine learning system that predicts **Buy / Sell / Hold signals** for the top 20 NIFTY stocks by combining technical indicators, calendar seasonality, and news sentiment analysis.
+BullBear AI is an end-to-end machine learning system that predicts Buy/Sell/Hold signals for NIFTY-50 stocks using technical indicators, calendar seasonality, and news sentiment analysis. Features include automated data pipelines, multiple ML models (Random Forest, XGBoost, LSTM), backtesting capabilities, and an interactive Streamlit dashboard. Achieves 33% outperformance over buy-and-hold strategies.
 
-## Features
 
-- **Data Pipeline**: Automated OHLCV data fetching, preprocessing, feature engineering, and target labeling
-- **Sentiment Analysis**: FinBERT-based sentiment scoring from financial news
-- **Model Training**: Classical ML (Random Forest, XGBoost, LightGBM) and LSTM neural networks
-- **Evaluation**: Time-series cross-validation, backtesting, and performance metrics
-- **Live Prediction**: Real-time signal generation for all 20 NIFTY stocks
-- **Interactive Dashboard**: Streamlit-based web interface for predictions and analysis
+---
 
-## Quick Start
+## Results
 
-### Installation
+| Model | Condition | F1 Macro | Backtest Return |
+|---|---|---|---|
+| **Random Forest** | **w/o sentiment** | **0.3769 ★** | **+38.1% ★** |
+| Random Forest | with sentiment | 0.3743 | +32.1% |
+| XGBoost | w/o sentiment | 0.3745 | +21.6% |
+| XGBoost | with sentiment | 0.3692 | −24.8% |
+| LightGBM | w/o sentiment | 0.3679 | −2.5% |
+| LightGBM | with sentiment | 0.3676 | −10.3% |
+| LSTM | with sentiment | 0.3294 | +69.5% |
+| LSTM | w/o sentiment | 0.3197 | −40.7% |
 
-```bash
-# Clone or download the project
-cd "BullBear AI - Stock Trend Predictor"
+**Buy-and-hold benchmark: +4.98%** · Test period: 2024–2026 · Production model: Random Forest w/o sentiment
 
-# Create virtual environment
-python -m venv bb_venv
-# On Windows:
-bb_venv\Scripts\activate
-# On Unix/Mac:
-# source bb_venv/bin/activate
+---
 
-# Install dependencies
-pip install -r requirements.txt
-```
+## Stack
 
-### Run the Complete Pipeline
+- **Data** — `yfinance` · 20 NIFTY tickers · 9 years (2017–2026) · 43,760 rows
+- **Features** — 25 total: technical indicators, calendar/seasonality, FinBERT sentiment
+- **Models** — Random Forest, XGBoost, LightGBM, LSTM (8 runs total)
+- **Dashboard** — Streamlit + Plotly
 
-```bash
-# Generate the ML-ready dataset
-python pipeline.py
-
-# Train all models (classical + LSTM)
-python train_classical.py
-python train_lstm.py
-
-# Evaluate and compare all models
-python evaluate.py
-
-# Launch the prediction dashboard
-streamlit run dashboard.py
-```
+---
 
 ## Project Structure
 
 ```
-├── data/
-│   ├── raw/           # Raw OHLCV data from Yahoo Finance
-│   ├── processed/     # Final ML-ready dataset
-│   ├── news/          # Financial news and sentiment scores
-│   ├── models/        # Trained model files and configs
-│   └── results/       # Evaluation metrics and backtest results
-├── build_docs/        # Project documentation
-├── dashboard.py       # Streamlit web interface
-├── pipeline.py        # Data preparation orchestrator
-├── train_classical.py # Classical ML training
-├── train_lstm.py      # LSTM neural network training
-├── evaluate.py        # Model evaluation and backtesting
-├── predict.py         # Live prediction engine
-├── sentiment.py       # News sentiment analysis
-└── requirements.txt   # Python dependencies
+├── data_fetch.py            # Download OHLCV from yfinance
+├── preprocess.py            # Clean, validate, forward-fill
+├── feature_engineering.py   # Engineer all 25 features
+├── target.py                # Create Buy/Sell/Hold labels
+├── pipeline.py              # Orchestrator (use_sentiment=True/False)
+├── sentiment.py             # FinBERT scoring + daily aggregation
+├── evaluate.py              # Train/test split, scaler, metrics, backtest
+├── train_classical.py       # RF / XGBoost / LightGBM — 6 runs
+├── train_lstm.py            # LSTM — 2 runs
+├── data_check.py            # Pre-training data validation
+├── predict.py               # Live prediction engine
+├── dashboard.py             # Streamlit dashboard
+│
+└── data/
+    ├── raw/                 # 20 ticker CSVs
+    ├── news/                # Kaggle news + FinBERT cache
+    ├── processed/           # bullbear_dataset.csv
+    ├── models/              # Trained models + scaler.pkl
+    └── results/             # Metrics, backtest, feature importances
 ```
 
-## Data Pipeline
+---
 
-### 1. Data Fetching (`data_fetch.py`)
-Downloads historical OHLCV data for the top 20 NIFTY stocks from Yahoo Finance.
+## Quickstart
 
-**Stocks Covered:**
-ASIANPAINT.NS, AXISBANK.NS, BAJFINANCE.NS, BHARTIARTL.NS, HCLTECH.NS, HDFCBANK.NS, HINDUNILVR.NS, ICICIBANK.NS, INFY.NS, ITC.NS, KOTAKBANK.NS, LT.NS, MARUTI.NS, RELIANCE.NS, SBIN.NS, SUNPHARMA.NS, TCS.NS, TITAN.NS, ULTRACEMCO.NS, WIPRO.NS
-
-### 2. Preprocessing (`preprocess.py`)
-- Data validation and cleaning
-- Forward-fill small gaps
-- Sort by date
-- Remove invalid entries
-
-### 3. Feature Engineering (`feature_engineering.py`)
-**21 Technical + Calendar Features:**
-
-#### Technical Indicators
-- **Trend**: MA ratios (10-day, 30-day), RSI (14-period)
-- **MACD**: Line ratio, signal ratio, histogram ratio
-- **Bollinger Bands**: Width, position percentage
-- **Volume/Returns**: Daily returns, volatility (10-day), log volume
-
-#### Calendar/Seasonal Features
-- Month, day of week, quarter
-- Seasonal flags (monsoon, winter, summer)
-- Cyclical encodings (sin/cos for month and weekday)
-
-### 4. Target Creation (`target.py`)
-**Buy/Sell/Hold Labels** based on next-day returns:
-- **SELL (0)**: Return < -1%
-- **HOLD (1)**: -1% ≤ Return ≤ +1%
-- **BUY (2)**: Return > +1%
-
-### 5. Sentiment Analysis (`sentiment.py`)
-- FinBERT model for financial news sentiment
-- Daily sentiment aggregation
-- Optional feature addition (25 total features with sentiment)
-
-## Model Training
-
-### Classical ML Models
-- **Random Forest**: Ensemble of decision trees
-- **XGBoost**: Gradient boosting with regularization
-- **LightGBM**: Microsoft's high-performance gradient boosting
-
-### LSTM Neural Network
-- **Sequence Length**: 30-day windows
-- **Architecture**: 2 LSTM layers (128 hidden), dropout 0.3, FC layers (128→64→3)
-- **Training**: Early stopping, Adam optimizer
-
-### Training Configurations
-Each model trained **twice** for ablation study:
-1. **With Sentiment**: 25 features (full set)
-2. **Without Sentiment**: 21 features (technical + calendar only)
-
-## Evaluation & Backtesting
-
-### Metrics
-- F1 Macro Score (primary metric)
-- Precision, Recall, Accuracy
-- Confusion Matrix
-- Classification Report
-
-### Backtesting
-- Simulated trading vs. buy-and-hold benchmark
-- Time-series walk-forward validation
-- Sharpe ratio, maximum drawdown, total return
-
-### Results Summary
-Models are evaluated and compared automatically. The best performing model (highest F1 macro) is selected as production model.
-
-### Model Performance Comparison
-
-| Model | Sentiment | F1 Macro | Accuracy | Strategy Return | Buy&Hold Return | Outperformance |
-|-------|-----------|----------|----------|-----------------|-----------------|---------------|
-| **Random Forest** | Without | **0.377** | **0.512** | **38.1%** | 5.0% | **33.1%** |
-| Random Forest | With | 0.374 | 0.513 | 35.8% | 5.0% | 30.8% |
-| XGBoost | Without | 0.375 | 0.479 | 32.4% | 5.0% | 27.4% |
-| XGBoost | With | 0.369 | 0.482 | 29.7% | 5.0% | 24.7% |
-| LightGBM | Without | 0.368 | 0.472 | 28.9% | 5.0% | 23.9% |
-| LightGBM | With | 0.368 | 0.476 | 31.2% | 5.0% | 26.2% |
-| LSTM | With | 0.329 | 0.589 | 15.6% | 5.0% | 10.6% |
-| LSTM | Without | 0.320 | 0.550 | 12.3% | 5.0% | 7.3% |
-
-**Best Model**: Random Forest without sentiment (F1 Macro: 0.377, Accuracy: 0.512, Outperformance: 33.1%)
-
-## Live Prediction
-
-### Usage
 ```bash
-# Predict all 20 stocks
-python predict.py
+python -m venv bb_venv
+bb_venv\Scripts\activate          # Windows
+# source bb_venv/bin/activate     # Mac/Linux
 
-# Predict specific stock
-python predict.py --ticker TCS.NS
+pip install -r requirements.txt
 ```
 
-### Features
-- Fetches latest market data
-- Generates real-time signals
-- 30-day history for context
-- Production Random Forest model
+### Run the full pipeline
 
-## Dashboard
+```bash
+python pipeline.py          # Build dataset
+python train_classical.py   # Train RF, XGBoost, LightGBM
+python train_lstm.py        # Train LSTM
+python evaluate.py          # Compare all models
+```
 
-### Launch
+### Launch the dashboard
+
 ```bash
 streamlit run dashboard.py
 ```
 
-### Features
-- Interactive predictions for all stocks
-- Real-time signal visualization
-- Historical performance charts
-- Model confidence scores
-- News sentiment integration
+### Run live predictions from the terminal
 
-## Dependencies
-
-Key packages:
-- `yfinance`: Data fetching
-- `pandas`, `numpy`: Data processing
-- `ta`: Technical analysis
-- `scikit-learn`: Classical ML
-- `xgboost`, `lightgbm`: Gradient boosting
-- `torch`: Deep learning
-- `transformers`: FinBERT sentiment
-- `streamlit`: Web dashboard
-
-## Model Files
-
-Trained models saved in `data/models/`:
-- `best_model_classical.pkl`: Production Random Forest
-- `scaler.pkl`: Fitted StandardScaler
-- `lstm_with_sentiment.pt`: LSTM with sentiment
-- `lstm_without_sentiment.pt`: LSTM without sentiment
-
-## Results
-
-Evaluation results in `data/results/`:
-- Model performance metrics (JSON)
-- Backtest results (JSON)
-- Feature importance rankings (CSV)
-- Training curves (PNG for LSTM)
-
-## Usage as Library
-
-```python
-# Load dataset
-from pipeline import load_dataset
-from feature_engineering import FEATURE_COLUMNS
-
-df = load_dataset()
-X = df[FEATURE_COLUMNS]
-y = df['signal']
-
-# Load trained model
-from predict import load_model
-model, scaler = load_model()
-
-# Make predictions
-from predict import predict_all
-signals, histories = predict_all()
+```bash
+python predict.py                  # All 20 tickers
+python predict.py --ticker TCS.NS  # Single ticker
 ```
 
-## Scaling Notes
+---
 
-- Features like RSI, MA ratios, and cyclical encodings are pre-bounded
-- `daily_return` and `volatility` require `StandardScaler` inside sklearn Pipeline
-- **Important**: Fit scaler on training data only to prevent data leakage
+## Features
 
-## Contributing
+### Technical (11)
+`ma10_ratio` · `ma30_ratio` · `rsi` · `macd_line_ratio` · `macd_signal_ratio` · `macd_hist_ratio` · `bb_width` · `bb_pct` · `daily_return` · `volatility` · `log_volume`
 
-This is a complete ML pipeline for stock trend prediction. For modifications:
-1. Maintain time-series integrity (no future data leakage)
-2. Use TimeSeriesSplit for cross-validation
-3. Test on unseen data before deployment
-4. Update documentation for any architectural changes
+### Calendar / Seasonality (10)
+`month` · `quarter` · `day_of_week` · `is_monsoon` · `is_winter` · `is_summer` · `month_sin` · `month_cos` · `day_of_week_sin` · `day_of_week_cos`
 
-## License
+### Sentiment — FinBERT (4)
+`sentiment_score` · `sentiment_magnitude` · `sentiment_article_count` · `has_sentiment`
 
-Academic/research use only. Not for live trading without extensive validation.
+Source: [Kaggle — India Financial News](https://www.kaggle.com/datasets/harshrkh/india-financial-news-headlines-sentiments) · Coverage: 2017–2021 (10.7% of rows)
+
+---
+
+## Target
+
+```
+BUY  (2)  next-day return > +1%
+HOLD (1)  −1% ≤ next-day return ≤ +1%
+SELL (0)  next-day return < −1%
+```
+
+---
+
+## Key Design Decisions
+
+- **Time-based split only** — no shuffling, train ≤ 2023-12-31, test ≥ 2024-01-01
+- **Scaler fitted on train only** — `StandardScaler` saved to `data/models/scaler.pkl`, applied separately to test
+- **TimeSeriesSplit(n_splits=5)** for cross-validation — regular k-fold is invalid for time-series
+- **MA / MACD / BB ratios** — normalised by price so features are comparable across all 20 tickers
+- **Post-close news → next trading day** — articles after 15:30 IST are attributed to the next day to prevent leakage
+- **Sentiment = 0 for missing days** — neutral fill, not negative
+
+---
+
+## Dashboard
+
+Three tabs:
+
+| Tab | Content |
+|---|---|
+| Overview | Signal card grid for all 20 tickers, sorted BUY → SELL → HOLD, with probability bars |
+| Ticker Detail | Candlestick chart with BUY▲ / SELL▼ markers · confidence gauge · feature importance · signal history table |
+| Model Performance | Full 8-model comparison table · key findings |
+
+---
+
+## Notes
+
+- `ta` library is **not required** — manual fallbacks are implemented for all indicators
+- Sentiment data only covers 2017–2021; the production model intentionally excludes sentiment (3 of 4 model families perform better without it at 10.7% coverage)
+- The LSTM +69.5% backtest figure is a known selectivity artifact — it predicts HOLD 88% of the time. F1 macro is the reliable metric.
+
+---
+
+> Academic / research use only. Not intended for live trading without further validation.
