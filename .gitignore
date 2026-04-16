@@ -35,7 +35,6 @@ build/
 *.ipynb
 
 # Large data and model files
-data/models/
 data/
 *.csv
 *.pkl
