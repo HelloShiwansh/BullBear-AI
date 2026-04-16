@@ -295,6 +295,24 @@ def _save_results(results: dict, model_name: str, condition: str) -> None:
 
 # ── 4. Backtest ───────────────────────────────────────────────────────────────
 
+def _build_return_lookup(df_full: pd.DataFrame) -> pd.Series:
+    """
+    Build a (date_str, ticker) → next_return lookup from the raw dataset.
+
+    This is the correct way to align returns with predictions when the
+    dataset has 20 tickers sharing the same dates. Looking up by date alone
+    returns 20 rows; looking up by (date, ticker) returns exactly one.
+
+    Uses next_return (the actual next-day return the signal is predicting).
+    Falls back to daily_return if next_return is not in the dataset.
+    """
+    return_col = "next_return" if "next_return" in df_full.columns else "daily_return"
+    df = df_full.copy()
+    df["_key"] = df.index.astype(str) + "||" + df["ticker"].astype(str)
+    lookup = df.set_index("_key")[return_col].fillna(0.0)
+    return lookup
+
+
 def run_backtest(
     model,
     X_test: pd.DataFrame,
@@ -302,81 +320,100 @@ def run_backtest(
     df_full: pd.DataFrame,
     model_name: str,
     condition: str,
+    ticker_series: pd.Series | None = None,
     verbose: bool = True,
 ) -> dict:
     """
     Simulate trading on the test period using model signals.
 
     Strategy:
-      BUY  signal → long position: gain next-day return
-      SELL signal → flat/short:   avoid next-day loss (return = 0)
-      HOLD signal → flat:         return = 0
+      BUY  signal → long: gain actual next-day return
+      SELL signal → flat: return = 0 (avoiding the loss)
+      HOLD signal → flat: return = 0
 
-    This is a simplified backtest — no transaction costs, no position sizing.
-    It answers: "if you followed these signals, did you beat buy-and-hold?"
+    Fix for multi-ticker date ambiguity:
+      Returns are looked up by (date, ticker) key — unique across the dataset.
+      X_test.index gives dates. ticker_series gives the corresponding ticker
+      for each row. Together they form a unique key per row.
 
-    Buy-and-hold benchmark: invest in equal weights across all 20 tickers
-    on the first test day and hold until the last test day.
+    Buy-and-hold benchmark:
+      Average next-day return across all tickers in the test period.
+      Represents investing equally in all 20 stocks and holding.
 
     Parameters
     ----------
-    model    : fitted model
-    X_test   : scaled test features (same index as y_test)
-    y_test   : true labels
-    df_full  : full dataset (needed for actual next-day returns)
-    model_name, condition : for labelling
+    model         : fitted model with .predict()
+    X_test        : scaled test features
+    y_test        : true labels
+    df_full       : full unscaled dataset (for return lookup)
+    model_name    : e.g. "random_forest", "lstm"
+    condition     : "with_sentiment" or "without_sentiment"
+    ticker_series : pd.Series of ticker names aligned with X_test rows.
+                    If None, uses df_full filtered to test dates.
+    verbose       : print results
 
     Returns
     -------
-    dict with cumulative returns
+    dict with backtest metrics
     """
     y_pred = model.predict(X_test)
 
-    # Get actual next-day returns for test rows
-    # daily_return at row t = (Close[t] - Close[t-1]) / Close[t-1]
-    # We need next-day return = what actually happened the day AFTER the signal
-    # This is the 'next_return' column saved in the full pipeline output
-    test_index = X_test.index
+    # ── Build (date, ticker) → return lookup ──────────────────────────────
+    return_lookup = _build_return_lookup(df_full)
 
-    # Align next_return with test rows
-    if "next_return" in df_full.columns:
-        next_returns = df_full.loc[
-            df_full.index.isin(test_index) &
-            df_full["ticker"].isin(df_full["ticker"].unique()),
-            "next_return"
-        ]
+    # ── Get ticker per test row ────────────────────────────────────────────
+    if ticker_series is not None:
+        # Classical path: ticker_series passed in, aligned with X_test
+        tickers = ticker_series.values
+        dates   = X_test.index.astype(str)
     else:
-        # Fallback: use daily_return shifted — approximate
-        next_returns = df_full.loc[test_index, "daily_return"] if "daily_return" in df_full.columns else pd.Series(0, index=test_index)
+        # Fallback: derive from df_full filtered to test dates
+        test_dates = X_test.index
+        df_test    = df_full[df_full.index.isin(test_dates)].sort_index()
+        tickers    = df_test["ticker"].values
+        dates      = df_test.index.astype(str)
 
-    # Compute strategy returns
-    strategy_returns = []
-    for i, (idx, pred) in enumerate(zip(test_index, y_pred)):
-        if pred == 2:  # BUY — take the return
-            ret = next_returns.get(idx, 0) if hasattr(next_returns, 'get') else 0
-        elif pred == 0:  # SELL — avoid the loss (return = 0, or negative of return for short)
-            ret = 0
-        else:  # HOLD — flat
-            ret = 0
-        strategy_returns.append(ret)
+    # ── Look up actual next-day returns per (date, ticker) ────────────────
+    min_len = min(len(y_pred), len(tickers), len(dates))
+    y_pred  = y_pred[:min_len]
 
-    strategy_returns = np.array(strategy_returns)
+    actual_returns = np.array([
+        return_lookup.get(f"{d}||{t}", 0.0)
+        for d, t in zip(dates[:min_len], tickers[:min_len])
+    ])
 
-    # Buy-and-hold: just take every daily return in test period
-    bah_returns = df_full[df_full.index.isin(test_index)]["daily_return"].values \
-                  if "daily_return" in df_full.columns else np.zeros(len(test_index))
+    # ── Strategy returns ───────────────────────────────────────────────────
+    # BUY  → take the actual next-day return
+    # SELL → stay flat (0) — we avoid the loss
+    # HOLD → stay flat (0)
+    strategy_returns = np.where(y_pred == 2, actual_returns, 0.0)
 
-    # Cumulative returns
+    # ── Buy-and-hold benchmark ─────────────────────────────────────────────
+    # Mean daily return across all tickers — equal weight portfolio held flat
+    return_col = "next_return" if "next_return" in df_full.columns else "daily_return"
+    bah_daily  = (
+        df_full[df_full.index > pd.Timestamp(TRAIN_END_DATE)]
+        .groupby(df_full[df_full.index > pd.Timestamp(TRAIN_END_DATE)].index)[return_col]
+        .mean()
+        .fillna(0.0)
+        .values
+    )
+
+    # ── Cumulative returns ─────────────────────────────────────────────────
+    # Guard against extreme values (scaled data leak) — clip at ±50% per day
+    strategy_returns = np.clip(strategy_returns, -0.5, 0.5)
+    bah_daily        = np.clip(bah_daily,        -0.5, 0.5)
+
     strategy_cumret = float(np.prod(1 + strategy_returns) - 1)
-    bah_cumret      = float(np.prod(1 + bah_returns) - 1)
+    bah_cumret      = float(np.prod(1 + bah_daily) - 1)
     outperformance  = strategy_cumret - bah_cumret
 
-    # Signal distribution
+    # ── Signal distribution ────────────────────────────────────────────────
     pred_series  = pd.Series(y_pred)
+    total        = len(y_pred)
     buy_signals  = int((pred_series == 2).sum())
     sell_signals = int((pred_series == 0).sum())
     hold_signals = int((pred_series == 1).sum())
-    total        = len(y_pred)
 
     backtest_results = {
         "model":               model_name,
@@ -398,7 +435,6 @@ def run_backtest(
               f"SELL={sell_signals/total*100:.1f}%  "
               f"HOLD={hold_signals/total*100:.1f}%")
 
-    # Save backtest results
     os.makedirs(RESULTS_DIR, exist_ok=True)
     path = os.path.join(RESULTS_DIR, f"backtest_{model_name}_{condition}.json")
     with open(path, "w") as f:
