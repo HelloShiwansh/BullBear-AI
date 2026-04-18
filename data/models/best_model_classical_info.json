@@ -1,6 +1,0 @@
-{
-  "model_name": "random_forest",
-  "condition": "without_sentiment",
-  "f1_macro": 0.3769,
-  "accuracy": 0.5115
-}

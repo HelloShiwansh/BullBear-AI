@@ -35,11 +35,10 @@ build/
 *.ipynb
 
 # Large data and model files
+data/
 *.csv
-data/results/
-data/news/
-data/processed/
-data/raw/
+*.pkl
+*.pickle
 
 # Logs
 *.log
