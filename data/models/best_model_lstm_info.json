@@ -1,0 +1,6 @@
+{
+  "model_name": "lstm",
+  "condition": "with_sentiment",
+  "f1_macro": 0.3294,
+  "accuracy": 0.5892
+}
