@@ -36,6 +36,7 @@ build/
 
 # Large data and model files
 data/
+data/models/
 *.csv
 *.pkl
 *.pickle
